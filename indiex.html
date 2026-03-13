@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Face ID Verification</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --green: #00ff41;
+    --green-dim: #00aa2a;
+    --green-dark: #003010;
+    --red: #ff2020;
+    --bg: #000;
+  }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: var(--bg);
+    font-family: 'Share Tech Mono', monospace;
+    color: var(--green);
+    overflow: hidden;
+    touch-action: manipulation;
+  }
+
+  .screen {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s;
+  }
+  .screen.active { opacity: 1; pointer-events: all; }
+
+  /* ── SCAN SCREEN ── */
+  #scan-screen { background: #000; }
+
+  .top-bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    padding: 14px 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #0a1a0a;
+  }
+  .top-bar span { font-size: 10px; letter-spacing: 3px; color: var(--green-dim); }
+  .dot-live { width: 8px; height: 8px; border-radius: 50%; background: var(--red); animation: liveblink 1s step-end infinite; }
+  @keyframes liveblink { 50% { opacity: 0; } }
+
+  .cam-wrapper {
+    position: relative;
+    width: min(320px, 88vw);
+    height: min(320px, 88vw);
+    border-radius: 50%;
+    overflow: hidden;
+    border: 2px solid #0a1a0a;
+    margin-bottom: 28px;
+  }
+
+  #video {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+    display: block;
+  }
+
+  .scan-overlay {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .scan-beam {
+    position: absolute;
+    left: 0; top: -6px;
+    width: 100%; height: 6px;
+    background: linear-gradient(to bottom, transparent, rgba(0,255,65,0.7), transparent);
+    display: none;
+  }
+  .scan-beam.running { display: block; animation: beamDown 1.6s linear infinite; }
+  @keyframes beamDown { 0% { top: -6px; } 100% { top: 105%; } }
+
+  .scan-ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    display: none;
+  }
+  .scan-ring.running {
+    display: block;
+    border-color: var(--green);
+    animation: ringPulse 1.6s ease-in-out infinite;
+    box-shadow: 0 0 20px rgba(0,255,65,0.3), inset 0 0 20px rgba(0,255,65,0.1);
+  }
+  @keyframes ringPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .face-dots {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    display: none;
+  }
+  .face-dots.show { display: block; }
+
+  .dot-point {
+    position: absolute;
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: var(--green);
+    transform: translate(-50%, -50%);
+    animation: dotFade 0.8s ease-in-out infinite alternate;
+  }
+  @keyframes dotFade { from { opacity: 1; } to { opacity: 0.2; } }
+
+  .cam-placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #050a05;
+  }
+
+  /* Corner brackets outside circle */
+  .brackets {
+    position: absolute;
+    inset: -12px;
+    pointer-events: none;
+  }
+  .brk {
+    position: absolute;
+    width: 22px; height: 22px;
+    border-color: var(--green-dim);
+    border-style: solid;
+  }
+  .brk.tl { top: 18px; left: 18px; border-width: 2px 0 0 2px; }
+  .brk.tr { top: 18px; right: 18px; border-width: 2px 2px 0 0; }
+  .brk.bl { bottom: 18px; left: 18px; border-width: 0 0 2px 2px; }
+  .brk.br { bottom: 18px; right: 18px; border-width: 0 2px 2px 0; }
+
+  .status-line {
+    font-size: 11px;
+    letter-spacing: 4px;
+    color: var(--green-dim);
+    text-align: center;
+    min-height: 18px;
+    margin-bottom: 14px;
+    text-transform: uppercase;
+  }
+
+  .prog-track {
+    width: min(280px, 80vw);
+    height: 3px;
+    background: #0a1a0a;
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 28px;
+  }
+  .prog-fill {
+    height: 100%;
+    background: var(--green);
+    width: 0%;
+    transition: width 0.15s linear;
+    box-shadow: 0 0 8px var(--green);
+  }
+
+  .scan-btn {
+    padding: 14px 44px;
+    background: transparent;
+    border: 1px solid var(--green);
+    color: var(--green);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    letter-spacing: 4px;
+    cursor: pointer;
+    border-radius: 2px;
+    text-transform: uppercase;
+    position: relative;
+    overflow: hidden;
+  }
+  .scan-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--green);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.2s;
+    z-index: -1;
+  }
+  .scan-btn:active::before { transform: scaleX(1); }
+  .scan-btn:active { color: #000; }
+
+  /* ── HACKED SCREEN ── */
+  #hacked-screen {
+    background: #000;
+    gap: 0;
+  }
+
+  .glitch-wrap { position: relative; margin-bottom: 6px; }
+
+  .glitch-text {
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(52px, 16vw, 80px);
+    font-weight: 900;
+    color: var(--red);
+    letter-spacing: 6px;
+    position: relative;
+    animation: glitchMain 0.12s infinite;
+  }
+  @keyframes glitchMain {
+    0%, 100% { text-shadow: 3px 0 #ff0000, -3px 0 #00ffff; }
+    25% { text-shadow: -3px 0 #ff0000, 3px 0 #00ffff; clip-path: inset(20% 0 50% 0); }
+    50% { text-shadow: 3px 2px #ff0000, -3px -2px #00ffff; }
+    75% { text-shadow: none; clip-path: inset(40% 0 30% 0); }
+  }
+
+  .glitch-text::before, .glitch-text::after {
+    content: 'HACKED!';
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+  }
+  .glitch-text::before {
+    color: #0ff;
+    animation: glitchA 0.12s infinite;
+    clip-path: polygon(0 30%, 100% 30%, 100% 50%, 0 50%);
+  }
+  .glitch-text::after {
+    color: #f0f;
+    animation: glitchB 0.12s infinite;
+    clip-path: polygon(0 60%, 100% 60%, 100% 80%, 0 80%);
+  }
+  @keyframes glitchA {
+    0%, 100% { transform: translate(-3px, 0); opacity: 0.8; }
+    50% { transform: translate(3px, -2px); opacity: 0.6; }
+  }
+  @keyframes glitchB {
+    0%, 100% { transform: translate(3px, 0); opacity: 0.8; }
+    50% { transform: translate(-3px, 2px); opacity: 0.6; }
+  }
+
+  .hacked-sub {
+    font-size: 10px;
+    letter-spacing: 4px;
+    color: #ff4444;
+    text-align: center;
+    margin-bottom: 24px;
+    animation: subFlicker 0.3s infinite;
+  }
+  @keyframes subFlicker { 60% { opacity: 0.7; } }
+
+  .data-lines {
+    font-size: 11px;
+    letter-spacing: 1px;
+    line-height: 2;
+    text-align: left;
+    color: #0f0;
+    width: min(280px, 85vw);
+    border-left: 2px solid #0a2a0a;
+    padding-left: 14px;
+  }
+  .data-line { opacity: 0; transform: translateX(-8px); transition: all 0.3s; }
+  .data-line.show { opacity: 1; transform: translateX(0); }
+  .ok { color: #ff4444; }
+
+  /* ── TRANSFER SCREEN ── */
+  #transfer-screen {
+    background: #000;
+    justify-content: flex-start;
+    padding-top: 60px;
+    overflow-y: auto;
+  }
+
+  .transfer-header {
+    font-size: 10px;
+    letter-spacing: 3px;
+    color: var(--green-dim);
+    margin-bottom: 20px;
+    text-align: center;
+  }
+
+  .file-card {
+    width: min(340px, 92vw);
+    background: #030a03;
+    border: 1px solid #0a1a0a;
+    border-radius: 4px;
+    padding: 11px 14px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .f-icon { font-size: 22px; flex-shrink: 0; }
+  .f-body { flex: 1; min-width: 0; }
+  .f-name {
+    font-size: 11px;
+    color: var(--green);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 5px;
+  }
+  .f-bar { height: 3px; background: #0a1a0a; border-radius: 2px; overflow: hidden; }
+  .f-fill { height: 100%; background: var(--green); width: 0%; box-shadow: 0 0 6px var(--green); }
+  .f-fill.done { background: var(--red); box-shadow: 0 0 6px var(--red); }
+  .f-pct { font-size: 10px; color: var(--green-dim); flex-shrink: 0; min-width: 34px; text-align: right; }
+  .f-pct.done { color: #ff4444; }
+
+  .speed-row {
+    font-size: 12px;
+    letter-spacing: 3px;
+    color: var(--red);
+    text-align: center;
+    margin-top: 16px;
+    animation: blink 0.9s step-end infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .ip-row {
+    font-size: 9px;
+    letter-spacing: 1px;
+    color: #0a2a0a;
+    text-align: center;
+    margin-top: 6px;
+  }
+
+  /* scanlines overlay */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(to bottom, transparent, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px);
+    pointer-events: none;
+    z-index: 9999;
+  }
+</style>
+</head>
+<body>
+
+<!-- SCAN SCREEN -->
+<div class="screen active" id="scan-screen">
+  <div class="top-bar">
+    <span>BIOMETRIC AUTH v3.1</span>
+    <div style="display:flex;align-items:center;gap:6px"><span style="font-size:9px;letter-spacing:2px">LIVE</span><div class="dot-live"></div></div>
+  </div>
+
+  <div style="position:relative;margin-bottom:28px;">
+    <div class="brackets">
+      <div class="brk tl"></div><div class="brk tr"></div>
+      <div class="brk bl"></div><div class="brk br"></div>
+    </div>
+    <div class="cam-wrapper">
+      <div class="cam-placeholder" id="cam-placeholder">
+        <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
+          <ellipse cx="40" cy="34" rx="20" ry="24" stroke="#1a3a1a" stroke-width="1.5"/>
+          <ellipse cx="30" cy="30" rx="3" ry="4" stroke="#1a3a1a" stroke-width="1"/>
+          <ellipse cx="50" cy="30" rx="3" ry="4" stroke="#1a3a1a" stroke-width="1"/>
+          <path d="M30 46 Q40 52 50 46" stroke="#1a3a1a" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+          <line x1="14" y1="34" x2="6" y2="31" stroke="#1a3a1a" stroke-width="1"/>
+          <line x1="66" y1="34" x2="74" y2="31" stroke="#1a3a1a" stroke-width="1"/>
+        </svg>
+      </div>
+      <video id="video" autoplay playsinline muted></video>
+      <div class="scan-overlay">
+        <div class="scan-beam" id="scan-beam"></div>
+        <div class="scan-ring" id="scan-ring"></div>
+        <canvas class="face-dots" id="dot-canvas" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="status-line" id="status-msg">POSITION YOUR FACE</div>
+  <div class="prog-track"><div class="prog-fill" id="prog-fill"></div></div>
+  <button class="scan-btn" id="scan-btn" onclick="initCamera()">SCAN FACE</button>
+</div>
+
+<!-- HACKED SCREEN -->
+<div class="screen" id="hacked-screen">
+  <div class="glitch-wrap"><div class="glitch-text">HACKED!</div></div>
+  <div class="hacked-sub">IDENTITY COMPROMISED · DATA BREACH DETECTED</div>
+  <div class="data-lines" id="data-lines">
+    <div class="data-line" id="dl0">► FACE DATA CAPTURED &nbsp;<span class="ok">[✓ STOLEN]</span></div>
+    <div class="data-line" id="dl1">► GPS LOCATION LOCKED &nbsp;<span class="ok">[✓ STOLEN]</span></div>
+    <div class="data-line" id="dl2">► CONTACTS CLONING... &nbsp;<span class="ok">[✓ STOLEN]</span></div>
+    <div class="data-line" id="dl3">► BANKING INFO FOUND &nbsp;<span class="ok">[✓ STOLEN]</span></div>
+    <div class="data-line" id="dl4">► PASSWORDS DUMPED &nbsp;&nbsp;<span class="ok">[✓ STOLEN]</span></div>
+    <div class="data-line" id="dl5">► PHOTOS UPLOADING... &nbsp;<span class="ok">[✓ STOLEN]</span></div>
+  </div>
+</div>
+
+<!-- TRANSFER SCREEN -->
+<div class="screen" id="transfer-screen">
+  <div class="transfer-header">TRANSMITTING TO REMOTE SERVER — DO NOT CLOSE</div>
+  <div id="file-list"></div>
+  <div class="speed-row" id="speed-row">UPLOADING: 0.0 MB/s</div>
+  <div class="ip-row" id="ip-row">DST: 185.220.101.47:8080</div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let videoStream = null;
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  $(id).classList.add('active');
+}
+
+async function initCamera() {
+  $('scan-btn').textContent = 'ACCESSING...';
+  $('scan-btn').disabled = true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+    videoStream = stream;
+    const video = $('video');
+    video.srcObject = stream;
+    video.style.display = 'block';
+    $('cam-placeholder').style.display = 'none';
+    await video.play();
+    setTimeout(startScan, 800);
+  } catch(e) {
+    $('cam-placeholder').style.display = 'flex';
+    $('video').style.display = 'none';
+    $('scan-btn').textContent = 'RETRY SCAN';
+    $('scan-btn').disabled = false;
+    $('status-msg').textContent = 'CAMERA ACCESS REQUIRED';
+  }
+}
+
+const scanMessages = [
+  'INITIALIZING SENSORS...',
+  'DETECTING FACE...',
+  'MAPPING BIOMETRICS...',
+  'ANALYZING NODES...',
+  'CROSS-REFERENCING...',
+  'IDENTITY FOUND...',
+  'VERIFYING MATCH...',
+];
+
+function startScan() {
+  $('scan-beam').classList.add('running');
+  $('scan-ring').classList.add('running');
+  drawDots();
+  navigator.vibrate && navigator.vibrate([80, 40, 80]);
+
+  let progress = 0;
+  let msgIdx = 0;
+  const fill = $('prog-fill');
+  const status = $('status-msg');
+
+  const iv = setInterval(() => {
+    progress += Math.random() * 2.5 + 0.8;
+    if (progress > 100) progress = 100;
+    fill.style.width = progress + '%';
+
+    const step = Math.floor(progress / (100 / scanMessages.length));
+    if (step !== msgIdx && step < scanMessages.length) {
+      msgIdx = step;
+      status.textContent = scanMessages[msgIdx];
+      navigator.vibrate && navigator.vibrate(30);
+    }
+
+    if (progress >= 100) {
+      clearInterval(iv);
+      status.textContent = 'IDENTITY CONFIRMED';
+      fill.style.background = '#ff2020';
+      fill.style.boxShadow = '0 0 8px #ff2020';
+      navigator.vibrate && navigator.vibrate([200, 100, 200, 100, 400]);
+      setTimeout(showHacked, 700);
+    }
+  }, 90);
+}
+
+function drawDots() {
+  const canvas = $('dot-canvas');
+  const size = canvas.offsetWidth;
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const cx = size / 2, cy = size * 0.42, r = size * 0.28;
+
+  const points = [];
+  // face oval
+  for (let a = 0; a < Math.PI * 2; a += 0.32) {
+    points.push([cx + Math.cos(a) * r * 0.85, cy + Math.sin(a) * r]);
+  }
+  // eyes
+  for (let a = 0; a < Math.PI * 2; a += 0.5) {
+    points.push([cx - r * 0.38 + Math.cos(a) * r * 0.18, cy - r * 0.2 + Math.sin(a) * r * 0.12]);
+    points.push([cx + r * 0.38 + Math.cos(a) * r * 0.18, cy - r * 0.2 + Math.sin(a) * r * 0.12]);
+  }
+  // nose
+  points.push([cx, cy + r * 0.12], [cx - r * 0.12, cy + r * 0.28], [cx + r * 0.12, cy + r * 0.28]);
+  // mouth
+  for (let a = 0.2; a < Math.PI - 0.2; a += 0.35) {
+    points.push([cx + Math.cos(Math.PI + a) * r * 0.38, cy + r * 0.55 + Math.sin(a) * r * 0.1]);
+  }
+
+  let frame = 0;
+  function draw() {
+    if (!$('scan-beam').classList.contains('running')) return;
+    ctx.clearRect(0, 0, size, size);
+    ctx.fillStyle = `rgba(0,255,65,${0.5 + 0.5 * Math.sin(frame * 0.1)})`;
+    points.forEach(([x, y]) => {
+      ctx.beginPath();
+      ctx.arc(x, y, 2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    // draw connections
+    ctx.strokeStyle = 'rgba(0,255,65,0.15)';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i < points.length; i++) {
+      for (let j = i + 1; j < points.length; j++) {
+        const dx = points[i][0] - points[j][0];
+        const dy = points[i][1] - points[j][1];
+        if (Math.sqrt(dx*dx + dy*dy) < size * 0.14) {
+          ctx.beginPath();
+          ctx.moveTo(points[i][0], points[i][1]);
+          ctx.lineTo(points[j][0], points[j][1]);
+          ctx.stroke();
+        }
+      }
+    }
+    frame++;
+    requestAnimationFrame(draw);
+  }
+  draw();
+}
+
+function showHacked() {
+  if (videoStream) { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
+  showScreen('hacked-screen');
+  navigator.vibrate && navigator.vibrate([400, 100, 400, 100, 600]);
+
+  for (let i = 0; i < 6; i++) {
+    setTimeout(() => {
+      $('dl' + i).classList.add('show');
+      navigator.vibrate && navigator.vibrate(40);
+    }, i * 320 + 300);
+  }
+  setTimeout(showTransfer, 6 * 320 + 1400);
+}
+
+const fakeFiles = [
+  { name: 'private_photos_backup.zip', size: '2.4 GB', icon: '🖼️' },
+  { name: 'banking_credentials.txt', size: '18 KB', icon: '🔑' },
+  { name: 'contacts_all.vcf', size: '840 KB', icon: '👥' },
+  { name: 'whatsapp_messages.db', size: '1.1 GB', icon: '💬' },
+  { name: 'location_history.json', size: '340 MB', icon: '📍' },
+  { name: 'face_biometric_data.bin', size: '64 KB', icon: '😶' },
+];
+
+function showTransfer() {
+  showScreen('transfer-screen');
+  const list = $('file-list');
+  fakeFiles.forEach((f, i) => {
+    const d = document.createElement('div');
+    d.className = 'file-card';
+    d.innerHTML = `<span class="f-icon">${f.icon}</span>
+      <div class="f-body">
+        <div class="f-name">${f.name}</div>
+        <div class="f-bar"><div class="f-fill" id="ff${i}"></div></div>
+      </div>
+      <div class="f-pct" id="fp${i}">0%</div>`;
+    list.appendChild(d);
+  });
+
+  const prg = fakeFiles.map(() => 0);
+  const spd = [0.9, 2.8, 1.6, 0.7, 1.2, 2.0];
+  const ips = ['185.220.101.47','91.108.4.177','95.142.41.100','194.165.16.77','37.120.238.58'];
+  let tick = 0;
+
+  const iv = setInterval(() => {
+    tick++;
+    let allDone = true;
+    prg.forEach((p, i) => {
+      if (p < 100) {
+        allDone = false;
+        prg[i] = Math.min(100, p + spd[i] * (0.6 + Math.random()));
+        const pct = Math.round(prg[i]);
+        $('ff' + i).style.width = pct + '%';
+        $('fp' + i).textContent = pct + '%';
+        if (pct >= 100) {
+          $('ff' + i).classList.add('done');
+          $('fp' + i).classList.add('done');
+          $('fp' + i).textContent = '✓';
+        }
+      }
+    });
+
+    $('speed-row').textContent = 'UPLOADING: ' + (Math.random() * 9 + 3).toFixed(1) + ' MB/s';
+    if (tick % 18 === 0) {
+      $('ip-row').textContent = 'DST: ' + ips[Math.floor(Math.random() * ips.length)] + ':' + (8000 + Math.floor(Math.random() * 999));
+    }
+    if (allDone) clearInterval(iv);
+  }, 55);
+}
+</script>
+</body>
+</html>
